@@ -1,0 +1,690 @@
+import os
+import sys
+import json
+import joblib
+
+if sys.platform.startswith('win'):
+    try:
+        sys.stdout.reconfigure(encoding='utf-8', errors='replace')
+    except Exception:
+        pass
+
+print("=========================================================")
+print("🌐 [GitHub Pages Export] 提取模型權重並生成純前端靜態單頁 index.html")
+print("=========================================================")
+
+# 1. 載入 50 Startups 模型
+startup_model_path = 'models/startup_profit_model.pkl'
+if not os.path.exists(startup_model_path):
+    raise FileNotFoundError(f"找不到模型檔案: {startup_model_path}")
+
+m_startup = joblib.load(startup_model_path)
+pre_startup = m_startup.named_steps['preprocessor']
+reg_startup = m_startup.named_steps['regressor']
+num_scaler = pre_startup.named_transformers_['num']
+
+startup_params = {
+    'num_features': ['R&D Spend', 'Administration', 'Marketing Spend'],
+    'means': num_scaler.mean_.tolist(),
+    'scales': num_scaler.scale_.tolist(),
+    'categories': ['California', 'Florida', 'New York'],
+    'coef': reg_startup.coef_.tolist(),
+    'intercept': float(reg_startup.intercept_)
+}
+print(f"[V] 成功提取 50 Startups 模型參數 (截距: {startup_params['intercept']:,.2f})")
+
+# 2. 載入 Flood Prediction 模型
+flood_model_path = 'models/flood_prediction_model.pkl'
+if not os.path.exists(flood_model_path):
+    raise FileNotFoundError(f"找不到模型檔案: {flood_model_path}")
+
+m_flood = joblib.load(flood_model_path)
+scaler_flood = m_flood.named_steps['scaler']
+reg_flood = m_flood.named_steps['regressor']
+flood_features = getattr(m_flood, 'features_', [
+    'MonsoonIntensity', 'TopographyDrainage', 'RiverManagement', 'Deforestation',
+    'Urbanization', 'ClimateChange', 'DamsQuality', 'Siltation',
+    'AgriculturalPractices', 'Encroachments', 'IneffectiveDisasterPreparedness',
+    'DrainageSystems', 'CoastalVulnerability', 'Landslides', 'Watersheds',
+    'DeterioratingInfrastructure', 'PopulationScore', 'WetlandLoss',
+    'InadequatePlanning', 'PoliticalFactors'
+])
+
+flood_params = {
+    'features': flood_features,
+    'means': scaler_flood.mean_.tolist(),
+    'scales': scaler_flood.scale_.tolist(),
+    'coef': reg_flood.coef_.tolist(),
+    'intercept': float(reg_flood.intercept_),
+    'pi_margin': float(getattr(m_flood, 'pi_margin_', 0.03607)),
+    'r2': float(getattr(m_flood, 'r2_', 0.8495)),
+    'rmse': float(getattr(m_flood, 'rmse_', 0.01706))
+}
+print(f"[V] 成功提取 Flood Prediction 模型參數 (截距: {flood_params['intercept']:.4f}, 95% PI: ±{flood_params['pi_margin']:.4f})")
+
+flood_meta = {
+    'MonsoonIntensity': {'name': '季風強度', 'cat': '氣候水文', 'icon': 'fa-cloud-showers-heavy'},
+    'ClimateChange': {'name': '氣候變遷', 'cat': '氣候水文', 'icon': 'fa-temperature-high'},
+    'RiverManagement': {'name': '河川治理', 'cat': '氣候水文', 'icon': 'fa-water'},
+    'DamsQuality': {'name': '水壩品質', 'cat': '氣候水文', 'icon': 'fa-shield-halved'},
+    'DrainageSystems': {'name': '排水系統', 'cat': '氣候水文', 'icon': 'fa-faucet-drip'},
+    'TopographyDrainage': {'name': '地形排水性', 'cat': '地貌水土', 'icon': 'fa-mountain'},
+    'Deforestation': {'name': '森林砍伐', 'cat': '地貌水土', 'icon': 'fa-tree'},
+    'Urbanization': {'name': '都市化程度', 'cat': '地貌水土', 'icon': 'fa-city'},
+    'AgriculturalPractices': {'name': '農業耕作實踐', 'cat': '地貌水土', 'icon': 'fa-wheat-awn'},
+    'Encroachments': {'name': '河道侵占', 'cat': '地貌水土', 'icon': 'fa-house-flood-water'},
+    'IneffectiveDisasterPreparedness': {'name': '防災整備無效度', 'cat': '地質危害', 'icon': 'fa-triangle-exclamation'},
+    'CoastalVulnerability': {'name': '海岸脆弱度', 'cat': '地質危害', 'icon': 'fa-water-ladder'},
+    'Landslides': {'name': '山崩滑坡風險', 'cat': '地質危害', 'icon': 'fa-hill-rockslide'},
+    'Watersheds': {'name': '集水區退化', 'cat': '地質危害', 'icon': 'fa-droplet-slash'},
+    'DeterioratingInfrastructure': {'name': '基礎設施老化', 'cat': '地質危害', 'icon': 'fa-bridge-water'},
+    'PopulationScore': {'name': '人口密集度', 'cat': '人口治理', 'icon': 'fa-users'},
+    'WetlandLoss': {'name': '濕地流失', 'cat': '人口治理', 'icon': 'fa-seedling'},
+    'InadequatePlanning': {'name': '都市規劃不當', 'cat': '人口治理', 'icon': 'fa-map-location-dot'},
+    'PoliticalFactors': {'name': '政策與治理因素', 'cat': '人口治理', 'icon': 'fa-landmark'},
+    'Siltation': {'name': '泥沙淤積', 'cat': '人口治理', 'icon': 'fa-layer-group'}
+}
+
+# 構造 HTML 內容
+html_content = f"""<!DOCTYPE html>
+<html lang="zh-TW" class="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>機器學習回歸分析雙核心平台 (50 Startups & Predict the Flood)</title>
+  <!-- Tailwind CSS -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- Google Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&family=Noto+Sans+TC:wght@300;400;500;700;900&display=swap" rel="stylesheet">
+  <!-- Font Awesome -->
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  <script>
+    tailwind.config = {{
+      darkMode: 'class',
+      theme: {{
+        extend: {{
+          fontFamily: {{
+            sans: ['"Plus Jakarta Sans"', '"Noto Sans TC"', 'sans-serif'],
+          }},
+          colors: {{
+            brand: {{
+              50: '#eff6ff',
+              500: '#3b82f6',
+              600: '#2563eb',
+              700: '#1d4ed8',
+            }}
+          }}
+        }}
+      }}
+    }}
+  </script>
+  <style>
+    body {{
+      font-family: 'Plus Jakarta Sans', 'Noto Sans TC', sans-serif;
+      background: radial-gradient(circle at 15% 15%, #1e293b 0%, #0f172a 100%);
+      min-height: 100vh;
+    }}
+    .glass {{
+      background: rgba(30, 41, 59, 0.7);
+      backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+    }}
+    .slider-track {{
+      accent-color: #3b82f6;
+    }}
+    .glow-blue {{
+      box-shadow: 0 0 25px -5px rgba(59, 130, 246, 0.3);
+    }}
+    .glow-emerald {{
+      box-shadow: 0 0 25px -5px rgba(16, 185, 129, 0.3);
+    }}
+    .glow-red {{
+      box-shadow: 0 0 25px -5px rgba(239, 68, 68, 0.4);
+    }}
+  </style>
+</head>
+<body class="text-slate-100 flex flex-col min-h-screen">
+
+  <!-- 頂部導航列 -->
+  <header class="glass sticky top-0 z-50 px-6 py-4 border-b border-slate-700/60 shadow-lg">
+    <div class="max-w-7xl mx-auto flex flex-col md:flex-row items-center justify-between gap-4">
+      <div class="flex items-center gap-3">
+        <div class="w-10 h-10 rounded-xl bg-gradient-to-tr from-blue-600 to-indigo-500 flex items-center justify-center text-white shadow-md">
+          <i class="fa-solid fa-chart-line text-lg"></i>
+        </div>
+        <div>
+          <h1 class="text-lg md:text-xl font-bold tracking-tight text-white flex items-center gap-2">
+            回歸分析雙核心智能預測平台
+            <span class="text-xs font-semibold px-2.5 py-0.5 rounded-full bg-blue-500/20 text-blue-400 border border-blue-500/30">
+              GitHub Pages 靜態運行
+            </span>
+          </h1>
+          <p class="text-xs text-slate-400">CRISP-DM 架構 × 100% 純前端即時推論 (Zero Backend Required)</p>
+        </div>
+      </div>
+
+      <!-- 資料集切換下拉選單 -->
+      <div class="flex items-center gap-2 w-full md:w-auto">
+        <label for="datasetSelector" class="text-xs md:text-sm font-semibold text-slate-300 flex items-center gap-1.5 whitespace-nowrap">
+          <i class="fa-solid fa-database text-blue-400"></i> 分析資料集：
+        </label>
+        <select id="datasetSelector" onchange="switchDataset(this.value)" class="w-full md:w-72 bg-slate-800 text-white text-sm font-medium rounded-xl px-4 py-2.5 border border-slate-600 focus:outline-none focus:ring-2 focus:ring-blue-500 shadow-inner cursor-pointer">
+          <option value="startup">🏢 DIC-2: 50 Startups (新創獲利預測)</option>
+          <option value="flood" selected>🌊 HW2: Predict the Flood (洪水機率預測)</option>
+        </select>
+      </div>
+    </div>
+  </header>
+
+  <!-- 主內容容器 -->
+  <main class="flex-grow max-w-7xl w-full mx-auto p-4 md:p-6 space-y-6">
+
+    <!-- 分頁選單列 -->
+    <div class="flex border-b border-slate-700/80 gap-2 overflow-x-auto pb-1 text-sm font-semibold">
+      <button onclick="switchTab('tab-predict')" id="btn-tab-predict" class="px-5 py-2.5 rounded-t-xl bg-blue-600 text-white flex items-center gap-2 transition-all">
+        <i class="fa-solid fa-bolt"></i> 即時推論與預測
+      </button>
+      <button onclick="switchTab('tab-figures')" id="btn-tab-figures" class="px-5 py-2.5 rounded-t-xl text-slate-400 hover:text-white hover:bg-slate-800/60 flex items-center gap-2 transition-all">
+        <i class="fa-solid fa-chart-pie"></i> 評估與圖表展示
+      </button>
+      <button onclick="switchTab('tab-notebooklm')" id="btn-tab-notebooklm" class="px-5 py-2.5 rounded-t-xl text-slate-400 hover:text-white hover:bg-slate-800/60 flex items-center gap-2 transition-all">
+        <i class="fa-solid fa-book-bookmark"></i> NotebookLM 文獻摘要
+      </button>
+      <button onclick="switchTab('tab-formula')" id="btn-tab-formula" class="px-5 py-2.5 rounded-t-xl text-slate-400 hover:text-white hover:bg-slate-800/60 flex items-center gap-2 transition-all">
+        <i class="fa-solid fa-square-root-variable"></i> 模型權重與公式解析
+      </button>
+    </div>
+
+    <!-- TAB 1: 即時推論與預測 -->
+    <section id="tab-predict" class="space-y-6">
+
+      <!-- 50 Startups 區塊 -->
+      <div id="view-startup" class="hidden grid grid-cols-1 lg:grid-cols-12 gap-6">
+        <div class="lg:col-span-5 glass p-6 rounded-2xl space-y-5">
+          <div class="flex items-center justify-between border-b border-slate-700 pb-3">
+            <h3 class="font-bold text-lg text-white flex items-center gap-2">
+              <i class="fa-solid fa-sliders text-blue-400"></i> 新創公司財務與地點參數
+            </h3>
+            <button onclick="resetStartupDefaults()" class="text-xs px-2.5 py-1 rounded bg-slate-700/80 hover:bg-slate-600 text-slate-300">
+              重置平均值
+            </button>
+          </div>
+
+          <div>
+            <div class="flex justify-between text-sm mb-1">
+              <label class="font-medium text-slate-300">研發支出 (R&D Spend)</label>
+              <span id="label-rd" class="text-blue-400 font-bold">$120,000</span>
+            </div>
+            <input type="range" id="input-rd" min="0" max="300000" step="1000" value="120000" oninput="calculateStartup()" class="w-full slider-track h-2 bg-slate-700 rounded-lg cursor-pointer">
+          </div>
+
+          <div>
+            <div class="flex justify-between text-sm mb-1">
+              <label class="font-medium text-slate-300">行政管理費 (Administration)</label>
+              <span id="label-admin" class="text-blue-400 font-bold">$100,000</span>
+            </div>
+            <input type="range" id="input-admin" min="0" max="300000" step="1000" value="100000" oninput="calculateStartup()" class="w-full slider-track h-2 bg-slate-700 rounded-lg cursor-pointer">
+          </div>
+
+          <div>
+            <div class="flex justify-between text-sm mb-1">
+              <label class="font-medium text-slate-300">市場行銷費 (Marketing Spend)</label>
+              <span id="label-mkt" class="text-blue-400 font-bold">$250,000</span>
+            </div>
+            <input type="range" id="input-mkt" min="0" max="500000" step="5000" value="250000" oninput="calculateStartup()" class="w-full slider-track h-2 bg-slate-700 rounded-lg cursor-pointer">
+          </div>
+
+          <div>
+            <label class="block text-sm font-medium text-slate-300 mb-1">公司登記州別 (State)</label>
+            <select id="input-state" onchange="calculateStartup()" class="w-full bg-slate-800 text-white text-sm rounded-xl px-4 py-2.5 border border-slate-600 focus:ring-2 focus:ring-blue-500">
+              <option value="New York" selected>New York (紐約州)</option>
+              <option value="California">California (加利福尼亞州 - 基準參照組)</option>
+              <option value="Florida">Florida (佛羅里達州)</option>
+            </select>
+            <p class="text-xs text-slate-400 mt-1">One-Hot Encoding 已啟用 drop='first' 規避虛擬變數陷阱。</p>
+          </div>
+        </div>
+
+        <div class="lg:col-span-7 space-y-6">
+          <div class="glass p-6 md:p-8 rounded-2xl border border-blue-500/30 glow-blue text-center space-y-3">
+            <span class="text-xs font-bold uppercase tracking-wider text-blue-400">
+              Estimated Net Profit (多元線性回歸即時預測)
+            </span>
+            <div id="startup-result-val" class="text-4xl md:text-5xl font-extrabold text-white tracking-tight">
+              $151,295.71
+            </div>
+            <p class="text-sm text-slate-400 max-w-md mx-auto">
+              此數值由前端 JavaScript 直出，套用後端 Standard Scaler 統計平均值與回歸係數矩陣。
+            </p>
+          </div>
+
+          <div class="glass p-6 rounded-2xl space-y-3">
+            <h4 class="font-bold text-slate-200 flex items-center gap-2">
+              <i class="fa-solid fa-lightbulb text-amber-400"></i> 商業決策與權重洞察
+            </h4>
+            <p class="text-sm text-slate-300 leading-relaxed">
+              依據訓練集權重分析，<strong class="text-blue-400">R&D Spend（研發支出）</strong> 標準化係數達 <strong>+38,102.27</strong>，對利潤呈壓倒性正向驅動（每增加 1 個標準差支出，利潤提升約 $38,102）。行政管理費為輕微負係數 (-1,864.75)，地理州別影響相對微弱。
+            </p>
+          </div>
+        </div>
+      </div>
+
+      <!-- Flood Prediction 區塊 -->
+      <div id="view-flood" class="grid grid-cols-1 lg:grid-cols-12 gap-6">
+        <div class="lg:col-span-7 glass p-6 rounded-2xl space-y-5">
+          <div class="flex flex-wrap items-center justify-between gap-3 border-b border-slate-700 pb-3">
+            <div>
+              <h3 class="font-bold text-lg text-white flex items-center gap-2">
+                <i class="fa-solid fa-water text-cyan-400"></i> 20 項水文與環境風險滑桿 (1 ~ 15)
+              </h3>
+              <p class="text-xs text-slate-400">Kaggle s4e5 基準評分（平均值約 5.0，愈高代表風險或指標程度愈大）</p>
+            </div>
+            <div class="flex gap-2 text-xs">
+              <button onclick="setFloodPreset(5.0)" class="px-3 py-1.5 rounded-lg bg-slate-700 hover:bg-slate-600 text-slate-200 transition">
+                🔄 全均值 (5.0)
+              </button>
+              <button onclick="setFloodPreset(10.0)" class="px-3 py-1.5 rounded-lg bg-red-600/80 hover:bg-red-500 text-white transition">
+                ⚠️ 高洪災 (10.0)
+              </button>
+              <button onclick="setFloodPreset(2.0)" class="px-3 py-1.5 rounded-lg bg-emerald-600/80 hover:bg-emerald-500 text-white transition">
+                🛡️ 安全 (2.0)
+              </button>
+            </div>
+          </div>
+
+          <div id="flood-sliders-container" class="space-y-4 max-h-[620px] overflow-y-auto pr-2">
+            <!-- 由 JS 動態注入 -->
+          </div>
+        </div>
+
+        <div class="lg:col-span-5 space-y-6">
+          <div id="flood-metric-card" class="glass p-6 md:p-8 rounded-2xl border border-cyan-500/40 glow-blue text-center space-y-3">
+            <span class="text-xs font-bold uppercase tracking-wider text-cyan-400">
+              Predicted Flood Probability (即時預測洪澇機率)
+            </span>
+            <div id="flood-result-val" class="text-5xl font-black text-white tracking-tight">
+              50.04%
+            </div>
+            
+            <div class="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-xl bg-slate-800/90 border border-slate-600 text-xs text-slate-300 font-semibold shadow-inner">
+              <i class="fa-solid fa-arrows-left-right text-blue-400"></i>
+              95% 預測區間：<span id="flood-pi-range" class="text-amber-400 font-bold">[46.43% ~ 53.64%]</span>
+              <span class="text-slate-400">(±3.61%)</span>
+            </div>
+
+            <div id="flood-risk-banner" class="mt-4 p-3 rounded-xl bg-amber-500/20 border border-amber-500/40 text-amber-300 text-xs font-medium text-left flex items-start gap-2.5">
+              <i class="fa-solid fa-triangle-exclamation text-base mt-0.5"></i>
+              <div id="flood-risk-text">中度警戒 (Moderate Hazard)：水文參數接近臨界閾值，建議加強巡防與排水維護。</div>
+            </div>
+          </div>
+
+          <div class="glass p-5 rounded-2xl space-y-3 text-xs">
+            <h4 class="font-bold text-slate-200 text-sm flex items-center gap-2">
+              <i class="fa-solid fa-square-poll-vertical text-emerald-400"></i> 統計檢驗效能指標 (Scikit-Learn)
+            </h4>
+            <div class="grid grid-cols-2 gap-2 text-slate-300">
+              <div class="p-2.5 rounded-lg bg-slate-800/60 border border-slate-700/60">
+                <div class="text-slate-400">決定係數 (R²)</div>
+                <div class="text-base font-bold text-emerald-400">0.8495</div>
+              </div>
+              <div class="p-2.5 rounded-lg bg-slate-800/60 border border-slate-700/60">
+                <div class="text-slate-400">均方根誤差 (RMSE)</div>
+                <div class="text-base font-bold text-blue-400">0.01706</div>
+              </div>
+              <div class="p-2.5 rounded-lg bg-slate-800/60 border border-slate-700/60">
+                <div class="text-slate-400">殘差標準誤 (s_e)</div>
+                <div class="text-base font-bold text-cyan-400">0.01840</div>
+              </div>
+              <div class="p-2.5 rounded-lg bg-slate-800/60 border border-slate-700/60">
+                <div class="text-slate-400">95% PI 實測覆蓋率</div>
+                <div class="text-base font-bold text-amber-400">95.83%</div>
+              </div>
+            </div>
+            <p class="text-slate-400 leading-normal">
+              依據高斯殘差假設，95% 預測區間包含單一未來觀測值之隨機擾動 ε，為工程防汛提供嚴密容錯邊界。
+            </p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- TAB 2: 圖表展示 -->
+    <section id="tab-figures" class="hidden space-y-6">
+      <div id="fig-startup-group" class="hidden space-y-6">
+        <h3 class="text-lg font-bold text-white flex items-center gap-2 border-b border-slate-700 pb-2">
+          <i class="fa-solid fa-chart-simple text-blue-400"></i> DIC-2: 50 Startups 核心視覺化圖表
+        </h3>
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+          <div class="glass p-5 rounded-2xl space-y-3">
+            <h4 class="font-bold text-slate-200 text-sm">1. 5 大回歸演算法評估對比 (R² vs. RMSE)</h4>
+            <img src="./reports/figures/comparison_of_5_models.png" alt="5 大演算法評估對比" class="rounded-xl border border-slate-700 w-full hover:scale-[1.01] transition-transform">
+            <p class="text-xs text-slate-400">隨機森林 ($R^2=0.9147$) 與 Lasso ($R^2=0.8988$) 表現最佳。</p>
+          </div>
+          <div class="glass p-5 rounded-2xl space-y-3">
+            <h4 class="font-bold text-slate-200 text-sm">2. RFE 特徵數量消長實驗 (k=1~5)</h4>
+            <img src="./reports/figures/feature_selection_trend.png" alt="特徵消長趨勢圖" class="rounded-xl border border-slate-700 w-full hover:scale-[1.01] transition-transform">
+            <p class="text-xs text-slate-400">僅需單一特徵 R&D Spend 即可達到 $R^2=0.9265$。</p>
+          </div>
+        </div>
+        <div class="glass p-5 rounded-2xl space-y-3 max-w-2xl mx-auto">
+          <h4 class="font-bold text-slate-200 text-sm">3. 支出與獲利之 Pearson 相關係數熱力圖</h4>
+          <img src="./reports/figures/correlation_heatmap.png" alt="相關係數熱力圖" class="rounded-xl border border-slate-700 w-full hover:scale-[1.01] transition-transform">
+        </div>
+      </div>
+
+      <div id="fig-flood-group" class="space-y-6">
+        <h3 class="text-lg font-bold text-white flex items-center gap-2 border-b border-slate-700 pb-2">
+          <i class="fa-solid fa-cloud-rain text-cyan-400"></i> HW2: Predict the Flood 關鍵視覺化圖表
+        </h3>
+        <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          <div class="glass p-5 rounded-2xl space-y-3">
+            <div class="flex items-center justify-between">
+              <h4 class="font-bold text-slate-200 text-sm">【HW2 核心】95% 預測區間 Actual vs. Predicted 擬合圖</h4>
+              <span class="text-xs font-semibold px-2 py-0.5 rounded bg-blue-500/20 text-blue-300">關鍵評估指標</span>
+            </div>
+            <img src="./reports/figures/flood_prediction_interval.png" alt="95% 預測區間圖" class="rounded-xl border border-slate-700 w-full hover:scale-[1.01] transition-transform">
+            <p class="text-xs text-slate-400">實測 95.83% 之觀測點完美落在 y = x ± 1.96 · s_e 預測帶內。</p>
+          </div>
+          <div class="glass p-5 rounded-2xl space-y-3">
+            <h4 class="font-bold text-slate-200 text-sm">20 特徵消長趨勢 (RFE 10~20 Features)</h4>
+            <img src="./reports/figures/flood_feature_selection.png" alt="洪水特徵消長趨勢" class="rounded-xl border border-slate-700 w-full hover:scale-[1.01] transition-transform">
+            <p class="text-xs text-slate-400">特徵數從 10 增至 20 時，$R^2$ 由 0.3929 大幅攀升至 0.8495。</p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- TAB 3: NotebookLM 文獻研究摘要 -->
+    <section id="tab-notebooklm" class="hidden space-y-6 max-w-4xl mx-auto">
+      <div class="glass p-6 md:p-8 rounded-2xl border-l-4 border-cyan-500 glow-blue space-y-3">
+        <div class="flex items-center gap-2 text-cyan-400 font-bold text-sm uppercase tracking-wide">
+          <i class="fa-solid fa-feather-pointed"></i> NotebookLM 100 字文獻研究摘要
+        </div>
+        <p class="text-base md:text-lg text-slate-100 font-medium leading-relaxed">
+          本研究透過 NotebookLM 研讀水文地質與極端氣候文獻，深度剖析 20 項致災因子。研究指出：季風強度與氣候變遷為宏觀致災推力，而河川管理、基礎設施老化與排水系統是微觀蓄洪防線。20 項因子呈現顯著等權重加成效應，多元線性回歸結合 95% 預測區間，能精準定量洪氾風險邊界，為水利韌性規劃提供科學決策依據。
+        </p>
+      </div>
+
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div class="glass p-5 rounded-2xl space-y-2 border border-slate-700">
+          <h4 class="font-bold text-white text-sm flex items-center gap-2">
+            <i class="fa-solid fa-cloud-bolt text-blue-400"></i> 1. 氣候與宏觀推力 (Meteorological Drivers)
+          </h4>
+          <p class="text-xs text-slate-300 leading-relaxed">
+            <strong>Monsoon Intensity & Climate Change</strong>：極端短延時強降雨頻率倍增，逕流峰值大幅超過歷史百年防洪設計標準，是誘發洪災的源頭原動力。
+          </p>
+        </div>
+        <div class="glass p-5 rounded-2xl space-y-2 border border-slate-700">
+          <h4 class="font-bold text-white text-sm flex items-center gap-2">
+            <i class="fa-solid fa-mountain-sun text-emerald-400"></i> 2. 地貌與水土涵養 (Geomorphic Retention)
+          </h4>
+          <p class="text-xs text-slate-300 leading-relaxed">
+            <strong>Deforestation & Wetland Loss</strong>：上游過度砍伐與天然濕地水泥化，嚴重削弱地表天然蓄水緩衝力，使得地表逕流係數激增、洪峰抵達時間大幅縮短。
+          </p>
+        </div>
+        <div class="glass p-5 rounded-2xl space-y-2 border border-slate-700">
+          <h4 class="font-bold text-white text-sm flex items-center gap-2">
+            <i class="fa-solid fa-shield-virus text-amber-400"></i> 3. 防禦工程與老化體系 (Infrastructure Vulnerability)
+          </h4>
+          <p class="text-xs text-slate-300 leading-relaxed">
+            <strong>Deteriorating Infrastructure & Dams Quality</strong>：既有水庫排洪閘門與老舊堤防若缺乏巡檢維護，在超額洪水位時易產生潰決或管湧滲透，加劇下游次生洪澇危害。
+          </p>
+        </div>
+        <div class="glass p-5 rounded-2xl space-y-2 border border-slate-700">
+          <h4 class="font-bold text-white text-sm flex items-center gap-2">
+            <i class="fa-solid fa-city text-purple-400"></i> 4. 都市化與治理政策 (Governance & Urbanization)
+          </h4>
+          <p class="text-xs text-slate-300 leading-relaxed">
+            <strong>Urbanization & Inadequate Planning</strong>：不透水鋪面密集擴張並伴隨河道兩岸違規侵占，暴雨無法及時下滲與排入箱涵，形成典型都會型內澇。
+          </p>
+        </div>
+      </div>
+    </section>
+
+    <!-- TAB 4: 模型權重與數學公式解析 -->
+    <section id="tab-formula" class="hidden space-y-6 max-w-4xl mx-auto">
+      <div class="glass p-6 md:p-8 rounded-2xl space-y-6">
+        <h3 class="font-bold text-lg text-white border-b border-slate-700 pb-3 flex items-center gap-2">
+          <i class="fa-solid fa-calculator text-blue-400"></i> 純前端回歸推論數學原理
+        </h3>
+        <div class="space-y-2">
+          <h4 class="font-semibold text-slate-200 text-sm">1. 特徵標準化 (Z-Score Standardization)</h4>
+          <div class="p-4 rounded-xl bg-slate-900 border border-slate-800 font-mono text-xs md:text-sm text-cyan-300 overflow-x-auto">
+            z_i = (x_i - mean_i) / scale_i
+          </div>
+          <p class="text-xs text-slate-400">前端使用 Scikit-Learn StandardScaler 在訓練集上學習到的均值向量與標準差向量進行即時映射。</p>
+        </div>
+        <div class="space-y-2">
+          <h4 class="font-semibold text-slate-200 text-sm">2. 多元線性回歸方程式 (Multiple Linear Regression)</h4>
+          <div class="p-4 rounded-xl bg-slate-900 border border-slate-800 font-mono text-xs md:text-sm text-emerald-300 overflow-x-auto">
+            y_pred = intercept + sum(z_i * coef_i)
+          </div>
+          <p class="text-xs text-slate-400">50 Startups 加入 One-Hot 虛擬變數；Predict the Flood 則對 20 個特徵進行加權累加。</p>
+        </div>
+        <div class="space-y-2">
+          <h4 class="font-semibold text-slate-200 text-sm">3. 95% 預測區間 (Prediction Interval)</h4>
+          <div class="p-4 rounded-xl bg-slate-900 border border-slate-800 font-mono text-xs md:text-sm text-amber-300 overflow-x-auto">
+            Prediction Interval = [y_pred - t_crit * s_e,  y_pred + t_crit * s_e]
+          </div>
+          <p class="text-xs text-slate-400">其中 s_e 為殘差均方根誤差 (0.01840)，t_crit 為自由度 n-p-1 下之 97.5% 分位數 (1.9610)，邊際誤差約 ±0.03607。</p>
+        </div>
+      </div>
+    </section>
+
+  </main>
+
+  <footer class="glass border-t border-slate-800 px-6 py-4 mt-8 text-center text-xs text-slate-400">
+    <div class="max-w-7xl mx-auto flex flex-col md:flex-row items-center justify-between gap-2">
+      <div>AIoT DIC-2 & HW2 回歸分析端對端整合專案 | Google Antigravity 部署導出</div>
+      <div>GitHub Pages 靜態運行架構</div>
+    </div>
+  </footer>
+
+  <!-- 純前端推論 JavaScript 引擎 -->
+  <script>
+    const STARTUP_PARAMS = {json.dumps(startup_params, indent=2)};
+    const FLOOD_PARAMS = {json.dumps(flood_params, indent=2)};
+    const FLOOD_META = {json.dumps(flood_meta, indent=2, ensure_ascii=False)};
+
+    let currentDataset = 'flood';
+
+    window.addEventListener('DOMContentLoaded', () => {{
+      renderFloodSliders();
+      calculateStartup();
+      calculateFlood();
+      switchDataset('flood');
+    }});
+
+    function switchDataset(dataset) {{
+      currentDataset = dataset;
+      document.getElementById('datasetSelector').value = dataset;
+
+      const viewStartup = document.getElementById('view-startup');
+      const viewFlood = document.getElementById('view-flood');
+      const figStartup = document.getElementById('fig-startup-group');
+      const figFlood = document.getElementById('fig-flood-group');
+
+      if (dataset === 'startup') {{
+        viewStartup.classList.remove('hidden');
+        viewFlood.classList.add('hidden');
+        figStartup.classList.remove('hidden');
+        figFlood.classList.add('hidden');
+        calculateStartup();
+      }} else {{
+        viewStartup.classList.add('hidden');
+        viewFlood.classList.remove('hidden');
+        figStartup.classList.add('hidden');
+        figFlood.classList.remove('hidden');
+        calculateFlood();
+      }}
+    }}
+
+    function switchTab(tabId) {{
+      const tabs = ['tab-predict', 'tab-figures', 'tab-notebooklm', 'tab-formula'];
+      tabs.forEach(t => {{
+        const el = document.getElementById(t);
+        const btn = document.getElementById('btn-' + t);
+        if (t === tabId) {{
+          el.classList.remove('hidden');
+          btn.className = 'px-5 py-2.5 rounded-t-xl bg-blue-600 text-white flex items-center gap-2 transition-all shadow-md';
+        }} else {{
+          el.classList.add('hidden');
+          btn.className = 'px-5 py-2.5 rounded-t-xl text-slate-400 hover:text-white hover:bg-slate-800/60 flex items-center gap-2 transition-all';
+        }}
+      }});
+    }}
+
+    function calculateStartup() {{
+      const rd = parseFloat(document.getElementById('input-rd').value) || 0;
+      const admin = parseFloat(document.getElementById('input-admin').value) || 0;
+      const mkt = parseFloat(document.getElementById('input-mkt').value) || 0;
+      const state = document.getElementById('input-state').value;
+
+      document.getElementById('label-rd').innerText = '$' + rd.toLocaleString('en-US');
+      document.getElementById('label-admin').innerText = '$' + admin.toLocaleString('en-US');
+      document.getElementById('label-mkt').innerText = '$' + mkt.toLocaleString('en-US');
+
+      const z_rd = (rd - STARTUP_PARAMS.means[0]) / STARTUP_PARAMS.scales[0];
+      const z_admin = (admin - STARTUP_PARAMS.means[1]) / STARTUP_PARAMS.scales[1];
+      const z_mkt = (mkt - STARTUP_PARAMS.means[2]) / STARTUP_PARAMS.scales[2];
+
+      const isFlorida = (state === 'Florida') ? 1.0 : 0.0;
+      const isNewYork = (state === 'New York') ? 1.0 : 0.0;
+
+      const coef = STARTUP_PARAMS.coef;
+      const pred = STARTUP_PARAMS.intercept 
+                 + z_rd * coef[0] 
+                 + z_admin * coef[1] 
+                 + z_mkt * coef[2] 
+                 + isFlorida * coef[3] 
+                 + isNewYork * coef[4];
+
+      document.getElementById('startup-result-val').innerText = '$' + pred.toLocaleString('en-US', {{
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2
+      }});
+    }}
+
+    function resetStartupDefaults() {{
+      document.getElementById('input-rd').value = 120000;
+      document.getElementById('input-admin').value = 100000;
+      document.getElementById('input-mkt').value = 250000;
+      document.getElementById('input-state').value = 'New York';
+      calculateStartup();
+    }}
+
+    function renderFloodSliders() {{
+      const container = document.getElementById('flood-sliders-container');
+      container.innerHTML = '';
+
+      const categories = ['氣候水文', '地貌水土', '地質危害', '人口治理'];
+      const catColors = {{
+        '氣候水文': 'border-blue-500/30 bg-blue-950/20',
+        '地貌水土': 'border-emerald-500/30 bg-emerald-950/20',
+        '地質危害': 'border-amber-500/30 bg-amber-950/20',
+        '人口治理': 'border-purple-500/30 bg-purple-950/20'
+      }};
+
+      categories.forEach(cat => {{
+        const groupCard = document.createElement('div');
+        groupCard.className = `p-4 rounded-xl border ${{catColors[cat]}} space-y-3`;
+        groupCard.innerHTML = `<h5 class="text-xs font-bold uppercase tracking-wider text-slate-300 flex items-center gap-2">
+          <span class="w-2 h-2 rounded-full bg-blue-400"></span> ${{cat}}致災因子
+        </h5>`;
+
+        const grid = document.createElement('div');
+        grid.className = 'grid grid-cols-1 md:grid-cols-2 gap-3';
+
+        FLOOD_PARAMS.features.forEach(feat => {{
+          const meta = FLOOD_META[feat] || {{ name: feat, cat: '其他', icon: 'fa-circle' }};
+          if (meta.cat === cat) {{
+            const item = document.createElement('div');
+            item.className = 'bg-slate-900/60 p-2.5 rounded-lg border border-slate-800';
+            item.innerHTML = `
+              <div class="flex items-center justify-between text-xs mb-1">
+                <span class="font-medium text-slate-300 flex items-center gap-1.5 truncate">
+                  <i class="fa-solid ${{meta.icon}} text-blue-400 text-[10px]"></i>
+                  ${{meta.name}}
+                </span>
+                <span id="label-flood-${{feat}}" class="text-cyan-400 font-bold ml-1">5.0</span>
+              </div>
+              <input type="range" id="input-flood-${{feat}}" min="1" max="15" step="0.5" value="5.0"
+                oninput="onFloodSliderInput('${{feat}}')" class="w-full slider-track h-1.5 bg-slate-700 rounded-lg cursor-pointer">
+            `;
+            grid.appendChild(item);
+          }}
+        }});
+
+        groupCard.appendChild(grid);
+        container.appendChild(groupCard);
+      }});
+    }}
+
+    function onFloodSliderInput(feat) {{
+      const val = parseFloat(document.getElementById('input-flood-' + feat).value);
+      document.getElementById('label-flood-' + feat).innerText = val.toFixed(1);
+      calculateFlood();
+    }}
+
+    function calculateFlood() {{
+      let dotProduct = 0;
+      FLOOD_PARAMS.features.forEach((feat, i) => {{
+        const inputEl = document.getElementById('input-flood-' + feat);
+        const val = inputEl ? parseFloat(inputEl.value) : 5.0;
+        const z = (val - FLOOD_PARAMS.means[i]) / FLOOD_PARAMS.scales[i];
+        dotProduct += z * FLOOD_PARAMS.coef[i];
+      }});
+
+      let pred = FLOOD_PARAMS.intercept + dotProduct;
+      pred = Math.max(0.0, Math.min(1.0, pred));
+
+      const pi_margin = FLOOD_PARAMS.pi_margin;
+      const lower = Math.max(0.0, pred - pi_margin);
+      const upper = Math.min(1.0, pred + pi_margin);
+
+      document.getElementById('flood-result-val').innerText = (pred * 100).toFixed(2) + '%';
+      document.getElementById('flood-pi-range').innerText = `[${{(lower*100).toFixed(2)}}% ~ ${{(upper*100).toFixed(2)}}%]`;
+
+      const banner = document.getElementById('flood-risk-banner');
+      const text = document.getElementById('flood-risk-text');
+      const card = document.getElementById('flood-metric-card');
+
+      if (pred >= 0.55) {{
+        banner.className = 'mt-4 p-3 rounded-xl bg-red-500/20 border border-red-500/40 text-red-300 text-xs font-medium text-left flex items-start gap-2.5';
+        text.innerHTML = '<strong>🚨 高洪災風險 (High Hazard)</strong>：多項水文地質參數超載，建議立即啟動防汛應變計畫。';
+        card.className = 'glass p-6 md:p-8 rounded-2xl border border-red-500/40 glow-red text-center space-y-3';
+      }} else if (pred >= 0.45) {{
+        banner.className = 'mt-4 p-3 rounded-xl bg-amber-500/20 border border-amber-500/40 text-amber-300 text-xs font-medium text-left flex items-start gap-2.5';
+        text.innerHTML = '<strong>⚠️ 中度警戒 (Moderate Hazard)</strong>：水文參數接近臨界閾值，需加強排水監控與河道巡檢。';
+        card.className = 'glass p-6 md:p-8 rounded-2xl border border-amber-500/40 glow-blue text-center space-y-3';
+      }} else {{
+        banner.className = 'mt-4 p-3 rounded-xl bg-emerald-500/20 border border-emerald-500/40 text-emerald-300 text-xs font-medium text-left flex items-start gap-2.5';
+        text.innerHTML = '<strong>✅ 常態安全 (Low Hazard)</strong>：整體水文與地貌指標良好，洪澇機率低於警戒值。';
+        card.className = 'glass p-6 md:p-8 rounded-2xl border border-emerald-500/40 glow-emerald text-center space-y-3';
+      }}
+    }}
+
+    function setFloodPreset(val) {{
+      FLOOD_PARAMS.features.forEach(feat => {{
+        const slider = document.getElementById('input-flood-' + feat);
+        const label = document.getElementById('label-flood-' + feat);
+        if (slider) slider.value = val;
+        if (label) label.innerText = val.toFixed(1);
+      }});
+      calculateFlood();
+    }}
+  </script>
+</body>
+</html>
+"""
+
+output_path = 'index.html'
+with open(output_path, 'w', encoding='utf-8') as f:
+    f.write(html_content)
+
+print(f"\n[V] 成功在專案根目錄生成靜態單頁純前端應用程式: {output_path}")
+print(f"    - 檔案大小: {len(html_content):,} 字元")
+print("    - 支援 GitHub Pages 完全免後端、無伺服器即時推論 (Client-Side Real-Time Inference)")
